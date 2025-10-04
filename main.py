@@ -5,6 +5,7 @@ import analysis
 import settings_manager
 import email_notifier
 import reminder_scheduler
+import symptoms
 from datetime import datetime
 
 class CravingApp:
@@ -12,6 +13,7 @@ class CravingApp:
         self.root = root
         self.root.title("Dzienniczek Głodów Alkoholowych")
         self.root.geometry("800x600")
+        self.selected_symptoms = []
 
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(pady=10, padx=10, fill="both", expand=True)
@@ -42,18 +44,22 @@ class CravingApp:
         self.intensity_var = tk.StringVar()
         ttk.Entry(input_frame, textvariable=self.intensity_var).grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
-        ttk.Label(input_frame, text="Wyzwalacze:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.triggers_var = tk.StringVar()
-        ttk.Entry(input_frame, textvariable=self.triggers_var).grid(row=1, column=1, padx=5, pady=5, sticky="ew")
+        ttk.Label(input_frame, text="Objawy/Wyzwalacze:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        ttk.Button(input_frame, text="Wybierz z listy", command=self.open_symptom_selector).grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-        ttk.Label(input_frame, text="Sposób radzenia sobie:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        self.symptoms_display = tk.Text(input_frame, height=4, width=50, state="disabled", wrap="word")
+        self.symptoms_display.grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky="ew")
+
+        ttk.Label(input_frame, text="Sposób radzenia sobie:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
         self.coping_var = tk.StringVar()
-        ttk.Entry(input_frame, textvariable=self.coping_var).grid(row=2, column=1, padx=5, pady=5, sticky="ew")
+        ttk.Entry(input_frame, textvariable=self.coping_var).grid(row=3, column=1, padx=5, pady=5, sticky="ew")
 
         self.drank_var = tk.BooleanVar()
-        ttk.Checkbutton(input_frame, text="Czy doszło do spożycia?", variable=self.drank_var).grid(row=3, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+        ttk.Checkbutton(input_frame, text="Czy doszło do spożycia?", variable=self.drank_var).grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="w")
 
-        ttk.Button(input_frame, text="Zapisz", command=self.save_entry).grid(row=4, column=0, columnspan=2, pady=10)
+        ttk.Button(input_frame, text="Zapisz", command=self.save_entry).grid(row=5, column=0, columnspan=2, pady=10)
+
+        input_frame.columnconfigure(1, weight=1)
 
         display_frame = ttk.LabelFrame(self.journal_frame, text="Historia Wpisów")
         display_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
@@ -66,7 +72,29 @@ class CravingApp:
         self.journal_frame.columnconfigure(0, weight=1)
         self.journal_frame.rowconfigure(1, weight=1)
 
+    def open_symptom_selector(self):
+        selector_window = tk.Toplevel(self.root)
+        selector_window.title("Wybierz Objawy")
+
+        vars = []
+        for symptom_text in symptoms.SYMPTOM_LIST:
+            var = tk.BooleanVar()
+            cb = ttk.Checkbutton(selector_window, text=symptom_text, variable=var, onvalue=True, offvalue=False)
+            cb.pack(anchor='w', padx=10, pady=2)
+            vars.append((var, symptom_text))
+
+        def confirm_selection():
+            self.selected_symptoms = [symptom_text for var, symptom_text in vars if var.get()]
+            self.symptoms_display.config(state="normal")
+            self.symptoms_display.delete(1.0, tk.END)
+            self.symptoms_display.insert(tk.END, ", ".join(self.selected_symptoms))
+            self.symptoms_display.config(state="disabled")
+            selector_window.destroy()
+
+        ttk.Button(selector_window, text="Zatwierdź", command=confirm_selection).pack(pady=10)
+
     def create_analysis_widgets(self):
+        # ... (rest of the code is unchanged)
         stats_frame = ttk.LabelFrame(self.analysis_frame, text="Podsumowanie")
         stats_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 
@@ -89,7 +117,7 @@ class CravingApp:
         self.analysis_frame.rowconfigure(1, weight=1)
 
     def create_settings_widgets(self):
-        # Email settings
+        # ... (rest of the code is unchanged)
         email_settings_frame = ttk.LabelFrame(self.settings_frame, text="Ustawienia E-mail (SMTP)")
         email_settings_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 
@@ -111,18 +139,14 @@ class CravingApp:
         ttk.Entry(email_settings_frame, textvariable=self.recipient_email_var).grid(row=4, column=1, padx=5, pady=5, sticky="ew")
         email_settings_frame.columnconfigure(1, weight=1)
 
-        # Reminder settings
         reminder_frame = ttk.LabelFrame(self.settings_frame, text="Ustawienia Przypomnień")
         reminder_frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
-
         self.reminders_enabled_var = tk.BooleanVar()
         ttk.Checkbutton(reminder_frame, text="Włącz codzienne przypomnienia", variable=self.reminders_enabled_var).grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="w")
-
         ttk.Label(reminder_frame, text="Godzina przypomnienia (HH:MM):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.reminder_time_var = tk.StringVar()
         ttk.Entry(reminder_frame, textvariable=self.reminder_time_var).grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-        # Action Buttons
         ttk.Button(self.settings_frame, text="Zapisz Ustawienia", command=self.save_app_settings).grid(row=2, column=0, padx=10, pady=10)
         ttk.Button(self.settings_frame, text="Wyślij E-mail Testowy", command=self.send_test_email_action).grid(row=3, column=0, padx=10, pady=10)
 
@@ -142,7 +166,6 @@ class CravingApp:
         except ValueError:
             messagebox.showerror("Błąd", "Port SMTP musi być liczbą.")
             return
-
         settings = {
             "smtp_server": self.smtp_server_var.get(),
             "smtp_port": port,
@@ -180,12 +203,16 @@ class CravingApp:
 
     def save_entry(self):
         intensity = self.intensity_var.get()
-        triggers = self.triggers_var.get()
+        triggers = ", ".join(self.selected_symptoms)
         coping = self.coping_var.get()
         drank = self.drank_var.get()
         if not intensity.isdigit() or not 1 <= int(intensity) <= 10:
             messagebox.showerror("Błąd", "Intensywność musi być liczbą od 1 do 10.")
             return
+        if not triggers:
+            messagebox.showerror("Błąd", "Proszę wybrać co najmniej jeden objaw/wyzwalacz.")
+            return
+
         entry_data = {
             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'intensity': intensity,
@@ -200,7 +227,10 @@ class CravingApp:
 
     def clear_fields(self):
         self.intensity_var.set("")
-        self.triggers_var.set("")
+        self.selected_symptoms = []
+        self.symptoms_display.config(state="normal")
+        self.symptoms_display.delete(1.0, tk.END)
+        self.symptoms_display.config(state="disabled")
         self.coping_var.set("")
         self.drank_var.set(False)
 
