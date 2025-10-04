@@ -59,7 +59,7 @@ class CravingApp:
         df = pd.DataFrame(all_entries)
         if not df.empty and 'timestamp' in df.columns:
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-            month_df = df[df['timestamp'].dt.to_period('M') == self.current_date.to_period('M')]
+            month_df = df[df['timestamp'].dt.to_period('M') == pd.Period(self.current_date, 'M')]
         else:
             month_df = pd.DataFrame()
 
