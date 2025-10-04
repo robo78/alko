@@ -1,42 +1,40 @@
 # Dzienniczek Głodów Alkoholowych
 
-Jest to aplikacja desktopowa z interfejsem graficznym (GUI) stworzona w Pythonie, służąca jako osobisty dziennik do monitorowania i analizowania głodów alkoholowych. Aplikacja pomaga użytkownikom w śledzeniu ich postępów w walce z nałogiem poprzez zapisywanie i analizowanie danych dotyczących głodów.
+Jest to aplikacja desktopowa z interfejsem graficznym (GUI) stworzona w Pythonie, służąca jako osobisty dziennik do monitorowania i analizowania głodów alkoholowych. Aplikacja została zaprojektowana wokół **wizualnego kalendarza**, który pozwala na szybką identyfikację wzorców i częstotliwości występowania poszczególnych objawów głodu.
 
-## Funkcje
+## Główne Funkcje
 
-- **Dziennik Wpisów**: Umożliwia użytkownikom dodawanie nowych wpisów o głodach, w tym:
-  - Data i godzina wystąpienia głodu (zapisywane automatycznie).
-  - Intensywność głodu na skali 1-10.
-  - Wybór objawów/wyzwalaczy z predefiniowanej listy.
-  - Opis sposobu radzenia sobie z głodem.
+- **Kalendarz Głodów**: Główny ekran aplikacji to interaktywny kalendarz miesięczny.
+  - **Wiersze** reprezentują predefiniowane objawy głodu (np. "Potrzeba napicia się", "Sny alkoholowe").
+  - **Kolumny** reprezentują dni miesiąca.
+  - Komórki w siatce są **automatycznie podświetlane**, jeśli dany objaw został zarejestrowany danego dnia, co daje natychmiastowy wgląd w Twoje wzorce.
+- **Dodawanie Wpisów**: Prosty formularz w nowym oknie pozwala na szybkie dodawanie wpisów, w tym:
+  - Intensywność głodu (1-10).
+  - Wybór jednego lub więcej objawów z listy.
+  - Opis zastosowanego sposobu radzenia sobie.
   - Zaznaczenie, czy doszło do spożycia alkoholu.
-- **Historia Wpisów**: Wszystkie wpisy są wyświetlane w przejrzystej tabeli, co pozwala na łatwe przeglądanie historii.
-- **Analiza i Podsumowanie**: Dedykowana zakładka "Analiza" automatycznie generuje:
-  - **Statystyki**: Całkowita liczba wpisów, średnia intensywność głodów, najczęstszy objaw/wyzwalacz oraz najczęściej stosowany sposób radzenia sobie.
-  - **Wykres**: Graficzna wizualizacja intensywności głodów w czasie, co ułatwia identyfikację trendów.
+- **Zaawansowana Analiza (Streamlit)**: Dedykowana zakładka "Analiza" uruchamia zewnętrzny, interaktywny panel analityczny.
+  - Panel jest zbudowany przy użyciu **Streamlit** i otwiera się w przeglądarce internetowej.
+  - Oferuje szczegółowe wykresy, statystyki i tabele, pozwalając na głębszą analizę danych z dzienniczka.
 - **Ustawienia i Powiadomienia E-mail**:
-  - **Konfiguracja SMTP**: Użytkownicy mogą skonfigurować własne dane serwera SMTP, aby otrzymywać powiadomienia e-mail.
-  - **Powiadomienia Codzienne**: Możliwość włączenia codziennych przypomnień e-mail o określonej godzinie, aby nie zapomnieć o uzupełnieniu dziennika.
-  - **Test E-mail**: Funkcja wysyłania testowego e-maila w celu weryfikacji poprawności ustawień.
+  - Możliwość skonfigurowania własnych danych serwera SMTP do wysyłki e-maili.
+  - Opcja włączenia codziennych przypomnień e-mail o stałej porze.
 
 ## Struktura Projektu
 
-Projekt jest podzielony na kilka modułów, co zapewnia czytelność i łatwość w zarządzaniu kodem:
-
-- `main.py`: Główny plik aplikacji. Odpowiada za stworzenie interfejsu graficznego (GUI) przy użyciu `tkinter`, zarządzanie zakładkami oraz integrację wszystkich pozostałych modułów.
-- `data_manager.py`: Zarządza operacjami na danych. Odpowiada za zapisywanie nowych wpisów do pliku `cravings.csv` oraz ich odczytywanie.
-- `analysis.py`: Zawiera logikę analityczną. Oblicza statystyki podsumowujące i generuje wykres intensywności głodów przy użyciu biblioteki `matplotlib`.
-- `symptoms.py`: Przechowuje predefiniowaną listę objawów i wyzwalaczy głodu alkoholowego, która jest wykorzystywana w formularzu wpisu.
-- `settings_manager.py`: Obsługuje ustawienia aplikacji. Zapisuje i odczytuje konfigurację (np. dane SMTP) z pliku `settings.json`.
-- `email_notifier.py`: Odpowiada za wysyłanie wiadomości e-mail przy użyciu `smtplib` na podstawie konfiguracji z menedżera ustawień.
-- `reminder_scheduler.py`: Implementuje harmonogram powiadomień. Używa bibliotek `schedule` i `threading` do uruchamiania wysyłki e-maili w tle, bez blokowania interfejsu użytkownika.
-- `requirements.txt`: Plik zawierający listę wszystkich zewnętrznych bibliotek Pythona potrzebnych do uruchomienia aplikacji.
+- `main.py`: Główny plik aplikacji. Odpowiada za stworzenie interfejsu graficznego (GUI) z **kalendarzem głodów**, zarządzanie zakładkami, obsługę dodawania wpisów oraz uruchamianie panelu Streamlit.
+- `viewer.py`: Skrypt aplikacji **Streamlit**. Odpowiada za wczytanie danych z `cravings.csv` i wygenerowanie interaktywnego panelu analitycznego w przeglądarce.
+- `data_manager.py`: Zarządza operacjami na danych (zapis i odczyt z pliku `cravings.csv`).
+- `symptoms.py`: Przechowuje predefiniowaną listę objawów głodu alkoholowego.
+- `settings_manager.py`: Obsługuje ustawienia aplikacji (zapis i odczyt z pliku `settings.json`).
+- `email_notifier.py`: Odpowiada za wysyłanie wiadomości e-mail.
+- `reminder_scheduler.py`: Implementuje harmonogram powiadomień e-mail w osobnym wątku.
+- `requirements.txt`: Plik zawierający listę wszystkich bibliotek Pythona potrzebnych do uruchomienia aplikacji (`tkinter`, `pandas`, `streamlit` itp.).
 - `cravings.csv`: Plik, w którym przechowywane są wszystkie wpisy z dziennika.
-- `settings.json`: Plik konfiguracyjny dla ustawień aplikacji (tworzony automatycznie).
+- `settings.json`: Plik konfiguracyjny (tworzony automatycznie).
+- `.gitignore`: Plik instruujący system kontroli wersji, aby ignorował pliki lokalne, takie jak `cravings.csv`, `settings.json` i `__pycache__`.
 
 ## Instalacja i Uruchomienie
-
-Aby uruchomić aplikację, postępuj zgodnie z poniższymi krokami:
 
 **1. Wymagania wstępne:**
    - Upewnij się, że masz zainstalowanego Pythona w wersji 3.6 lub nowszej.
@@ -48,15 +46,21 @@ Aby uruchomić aplikację, postępuj zgodnie z poniższymi krokami:
    ```
 
 **3. Instalacja zależności:**
-   Otwórz terminal lub wiersz poleceń w głównym folderze projektu i zainstaluj wymagane biblioteki za pomocą poniższej komendy:
+   Otwórz terminal lub wiersz poleceń w głównym folderze projektu i zainstaluj wymagane biblioteki:
    ```bash
    pip install -r requirements.txt
    ```
 
 **4. Uruchomienie aplikacji:**
-   Po pomyślnej instalacji zależności, uruchom aplikację, wykonując poniższą komendę:
+   Uruchom główną aplikację z interfejsem kalendarza:
    ```bash
    python3 main.py
    ```
 
-Po wykonaniu tej komendy, główne okno aplikacji powinno pojawić się na ekranie.
+**5. Uruchomienie panelu analitycznego:**
+   W głównej aplikacji przejdź do zakładki **"Analiza"** i kliknij przycisk **"Uruchom Panel Analizy (Streamlit)"**. Spowoduje to otwarcie nowej karty w Twojej domyślnej przeglądarce z interaktywnym panelem.
+
+   Alternatywnie, możesz uruchomić panel analityczny bezpośrednio z terminala:
+   ```bash
+   streamlit run viewer.py
+   ```
