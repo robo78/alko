@@ -19,8 +19,13 @@ class CravingApp:
         self.root.geometry("1200x800")
         self.selected_symptoms = []
         self.templates = []
+        self.default_template_background = "#ff7979"
+        self.default_template_foreground = "#000000"
         self.cell_marks = calendar_marks_manager.load_marks()
         self.current_date = datetime.now()
+        self.scale_levels = [str(level) for level in range(1, 11)]
+        self.symptom_column_width = 200
+        self._resizing_symptom_column = False
 
         # --- Main Layout ---
         self.notebook = ttk.Notebook(root)
@@ -68,40 +73,77 @@ class CravingApp:
 
         days_in_month = calendar.monthrange(self.current_date.year, self.current_date.month)[1]
 
-        ttk.Label(self.calendar_frame, text="Objaw / Wyzwalacz", font=("Helvetica", 10, "bold"), relief="solid", borderwidth=1, padding=5).grid(row=0, column=0, sticky="nsew")
+        self.symptom_labels = []
+
+        header_label = ttk.Label(
+            self.calendar_frame,
+            text="Objaw / Wyzwalacz",
+            font=("Helvetica", 10, "bold"),
+            relief="solid",
+            borderwidth=1,
+            padding=5,
+            anchor="w"
+        )
+        header_label.grid(row=0, column=0, sticky="nsew")
+        header_label.configure(wraplength=self.symptom_column_width - 10)
+
+        resizer = tk.Frame(self.calendar_frame, width=6, cursor="sb_h_double_arrow", bg="#d0d0d0")
+        resizer.grid(row=0, column=1, rowspan=len(symptoms.SYMPTOM_LIST) + 1, sticky="ns")
+        resizer.bind("<ButtonPress-1>", self.start_resizing_symptom_column)
+        resizer.bind("<B1-Motion>", self.perform_resizing_symptom_column)
+        resizer.bind("<ButtonRelease-1>", self.finish_resizing_symptom_column)
+        self._symptom_header_label = header_label
 
         for day_num in range(1, days_in_month + 1):
             date = datetime(self.current_date.year, self.current_date.month, day_num)
             day_button = ttk.Button(self.calendar_frame, text=str(day_num), command=lambda d=date: self.open_new_entry_window(d))
-            day_button.grid(row=0, column=day_num, sticky="nsew")
+            day_button.grid(row=0, column=day_num + 1, sticky="nsew")
 
         self.cell_marks = calendar_marks_manager.load_marks()
 
         for i, symptom in enumerate(symptoms.SYMPTOM_LIST, start=1):
-            symptom_label = ttk.Label(self.calendar_frame, text=symptom, wraplength=200, relief="solid", borderwidth=1, padding=5)
+            symptom_label = ttk.Label(
+                self.calendar_frame,
+                text=symptom,
+                wraplength=self.symptom_column_width - 10,
+                relief="solid",
+                borderwidth=1,
+                padding=5,
+                anchor="w"
+            )
             symptom_label.grid(row=i, column=0, sticky="nsew")
+            self.symptom_labels.append(symptom_label)
             for day_num in range(1, days_in_month + 1):
                 cell_color = "#f0f0f0"
                 cell_text = ""
                 date_str = datetime(self.current_date.year, self.current_date.month, day_num).strftime("%Y-%m-%d")
-                mark_template = calendar_marks_manager.get_template(date_str, symptom, self.cell_marks)
-                if mark_template is not None:
-                    cell_color = "#ff7979"
-                    cell_text = mark_template if mark_template else "✓"
+                mark_data = calendar_marks_manager.get_mark(date_str, symptom, self.cell_marks)
+                text_color = "#000000"
+                if mark_data is not None:
+                    template_name = mark_data.get("template")
+                    scale_value = mark_data.get("scale")
+                    template_info = self._get_template_by_name(template_name) if template_name else None
+                    if template_info:
+                        cell_color = template_info.get("background", cell_color)
+                        text_color = template_info.get("foreground", text_color)
+                    else:
+                        cell_color = "#ff7979"
+                    cell_text = scale_value if scale_value else "✓"
                 if not month_df.empty:
                     day_entries = month_df[month_df['timestamp'].dt.day == day_num]
                     if not day_entries.empty and 'triggers' in day_entries.columns:
                         symptom_present = day_entries['triggers'].str.contains(symptom, na=False).any()
-                        if symptom_present:
-                            cell_color = "#ffb3b3" if mark_template is None else cell_color
-                cell = tk.Label(self.calendar_frame, bg=cell_color, relief="solid", borderwidth=1, text=cell_text)
-                cell.grid(row=i, column=day_num, sticky="nsew")
+                        if symptom_present and mark_data is None:
+                            cell_color = "#ffb3b3"
+                cell = tk.Label(self.calendar_frame, bg=cell_color, fg=text_color, relief="solid", borderwidth=1, text=cell_text)
+                cell.grid(row=i, column=day_num + 1, sticky="nsew")
                 cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(e, s, d))
                 cell.bind("<Button-3>", lambda e, s=symptom, d=day_num: self.open_cell_menu(e, s, d))
                 cell.configure(cursor="hand2")
 
-        self.calendar_frame.grid_columnconfigure(0, weight=1, uniform="group1")
-        for col in range(1, days_in_month + 1):
+        self.calendar_frame.grid_columnconfigure(0, weight=0, minsize=self.symptom_column_width)
+        self.calendar_frame.grid_columnconfigure(1, weight=0, minsize=6)
+        for col in range(2, days_in_month + 2):
             self.calendar_frame.grid_columnconfigure(col, weight=1, uniform="group1")
         for row in range(len(symptoms.SYMPTOM_LIST) + 1):
             self.calendar_frame.grid_rowconfigure(row, weight=1, uniform="group1")
@@ -110,14 +152,18 @@ class CravingApp:
         date = datetime(self.current_date.year, self.current_date.month, day_num)
         date_str = date.strftime("%Y-%m-%d")
         if calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks):
+            previous_mark = calendar_marks_manager.get_mark(date_str, symptom, self.cell_marks)
+            previous_value = previous_mark.get("scale") if previous_mark else None
             self.cell_marks = calendar_marks_manager.remove_mark(date_str, symptom, self.cell_marks)
+            self.draw_calendar_view()
+            self.open_cell_menu(event, symptom, day_num, date_str=date_str, previous_value=previous_value)
         else:
-            default_template = self.templates[0] if self.templates else ""
-            self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, default_template, self.cell_marks)
-        self.draw_calendar_view()
-        self.open_cell_menu(event, symptom, day_num, date_str=date_str)
+            default_template = self.templates[0]["name"] if self.templates else ""
+            self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, template=default_template, marks=self.cell_marks)
+            self.draw_calendar_view()
+            self.open_cell_menu(event, symptom, day_num, date_str=date_str)
 
-    def open_cell_menu(self, event, symptom, day_num, date_str=None):
+    def open_cell_menu(self, event, symptom, day_num, date_str=None, previous_value=None):
         if date_str is None:
             date = datetime(self.current_date.year, self.current_date.month, day_num)
             date_str = date.strftime("%Y-%m-%d")
@@ -125,23 +171,131 @@ class CravingApp:
         is_marked = calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks)
         if is_marked:
             menu.add_command(label="Usuń zaznaczenie", command=lambda: self.remove_cell_mark(date_str, symptom))
-            if self.templates:
-                menu.add_separator()
-                for template in self.templates:
-                    menu.add_command(label=f"Ustaw szablon: {template}", command=lambda t=template: self.assign_template(date_str, symptom, t))
         else:
-            menu.add_command(label="Zaznacz głód", command=lambda: self.assign_template(date_str, symptom, self.templates[0] if self.templates else ""))
-            if self.templates:
-                menu.add_separator()
-                for template in self.templates:
-                    menu.add_command(label=f"Zaznacz jako: {template}", command=lambda t=template: self.assign_template(date_str, symptom, t))
+            menu.add_command(label="Zaznacz głód", command=lambda: self.assign_template(date_str, symptom, self.templates[0]["name"] if self.templates else ""))
+
+        scale_menu = tk.Menu(menu, tearoff=0)
+        current_mark = calendar_marks_manager.get_mark(date_str, symptom, self.cell_marks)
+        current_value = current_mark.get("scale") if current_mark else None
+        current_template = current_mark.get("template") if current_mark else None
+        if current_value:
+            menu.add_command(label=f"Aktualna skala: {current_value}", state="disabled")
+            menu.add_separator()
+        elif previous_value:
+            menu.add_command(label=f"Poprzednia skala: {previous_value}", state="disabled")
+            menu.add_separator()
+        menu.add_cascade(label="Skala głodu", menu=scale_menu)
+        for level in self.scale_levels:
+            scale_menu.add_command(
+                label=f"{level}",
+                command=lambda l=level: self.assign_scale(date_str, symptom, l)
+            )
+
+        if self.templates:
+            templates_menu = tk.Menu(menu, tearoff=0)
+            for template in self.templates:
+                label = template["name"]
+                if current_template and current_template == label:
+                    label = f"{label} (aktywny)"
+                templates_menu.add_command(
+                    label=label,
+                    command=lambda t=template["name"]: self.assign_template(date_str, symptom, t)
+                )
+            menu.add_cascade(label="Szablony", menu=templates_menu)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
 
+    def start_resizing_symptom_column(self, event):
+        self._resizing_symptom_column = True
+        self._resize_start_x = event.x_root
+        self._initial_symptom_width = self.symptom_column_width
+
+    def perform_resizing_symptom_column(self, event):
+        if not self._resizing_symptom_column:
+            return
+        delta = event.x_root - self._resize_start_x
+        new_width = max(80, self._initial_symptom_width + delta)
+        self.symptom_column_width = new_width
+        self.calendar_frame.grid_columnconfigure(0, minsize=self.symptom_column_width)
+        wrap_value = max(10, self.symptom_column_width - 10)
+        if hasattr(self, "_symptom_header_label"):
+            self._symptom_header_label.configure(wraplength=wrap_value)
+        for label in getattr(self, "symptom_labels", []):
+            label.configure(wraplength=wrap_value)
+
+    def finish_resizing_symptom_column(self, event):
+        self._resizing_symptom_column = False
+
+    def _get_template_by_name(self, name):
+        if not name:
+            return None
+        for template in self.templates:
+            if template.get("name") == name:
+                return template
+        return None
+
+    def _normalize_templates(self, templates_raw):
+        normalized = []
+        for item in templates_raw:
+            if isinstance(item, dict):
+                name = str(item.get("name", "")).strip()
+                if not name:
+                    continue
+                background = item.get("background") or item.get("bg") or self.default_template_background
+                foreground = item.get("foreground") or item.get("fg") or self.default_template_foreground
+                normalized.append({
+                    "name": name,
+                    "background": background,
+                    "foreground": foreground,
+                })
+            elif isinstance(item, str):
+                name = item.strip()
+                if not name:
+                    continue
+                normalized.append({
+                    "name": name,
+                    "background": self.default_template_background,
+                    "foreground": self.default_template_foreground,
+                })
+        return normalized
+
+    def _format_template_line(self, template):
+        name = template.get("name", "")
+        background = template.get("background", self.default_template_background)
+        foreground = template.get("foreground", self.default_template_foreground)
+        if foreground == self.default_template_foreground:
+            return f"{name};{background}"
+        return f"{name};{background};{foreground}"
+
+    def _parse_templates_input(self, raw_text):
+        templates = []
+        for line in raw_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = [part.strip() for part in line.split(';')]
+            if not parts:
+                continue
+            name = parts[0]
+            if not name:
+                continue
+            background = parts[1] if len(parts) > 1 and parts[1] else self.default_template_background
+            foreground = parts[2] if len(parts) > 2 and parts[2] else self.default_template_foreground
+            templates.append({
+                "name": name,
+                "background": background,
+                "foreground": foreground,
+            })
+        return templates
+
     def assign_template(self, date_str, symptom, template):
-        self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, template, self.cell_marks)
+        self.cell_marks = calendar_marks_manager.update_mark(date_str, symptom, template=template, marks=self.cell_marks)
+        self.draw_calendar_view()
+
+    def assign_scale(self, date_str, symptom, scale):
+        self.cell_marks = calendar_marks_manager.update_mark(date_str, symptom, scale=scale, marks=self.cell_marks)
         self.draw_calendar_view()
 
     def remove_cell_mark(self, date_str, symptom):
@@ -280,7 +434,10 @@ class CravingApp:
         ttk.Entry(reminder_frame, textvariable=self.reminder_time_var).grid(row=1, column=1, padx=5, pady=5, sticky="w")
         templates_frame = ttk.LabelFrame(self.settings_frame, text="Szablony zaznaczeń")
         templates_frame.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
-        ttk.Label(templates_frame, text="Podaj nazwy szablonów (jeden na linię):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        ttk.Label(
+            templates_frame,
+            text="Podaj szablony kolorów w formacie: nazwa;#kolor_tła;#kolor_tekstu (ostatni parametr opcjonalny)"
+        ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.templates_text = tk.Text(templates_frame, height=5, width=40)
         self.templates_text.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
         templates_frame.columnconfigure(0, weight=1)
@@ -296,19 +453,25 @@ class CravingApp:
         self.recipient_email_var.set(settings.get("recipient_email", ""))
         self.reminders_enabled_var.set(settings.get("reminders_enabled", False))
         self.reminder_time_var.set(settings.get("reminder_time", "20:00"))
-        self.templates = settings.get("templates", [])
+        self.templates = self._normalize_templates(settings.get("templates", []))
         if hasattr(self, 'templates_text'):
             self.templates_text.delete("1.0", tk.END)
-            self.templates_text.insert(tk.END, "\n".join(self.templates))
+            formatted = "\n".join(self._format_template_line(tpl) for tpl in self.templates)
+            self.templates_text.insert(tk.END, formatted)
         self.draw_calendar_view()
 
     def save_app_settings(self):
         try: port = int(self.smtp_port_var.get())
         except ValueError: messagebox.showerror("Błąd", "Port SMTP musi być liczbą."); return
         templates_raw = self.templates_text.get("1.0", tk.END) if hasattr(self, 'templates_text') else ""
-        templates = [line.strip() for line in templates_raw.splitlines() if line.strip()]
+        templates = self._parse_templates_input(templates_raw)
+        templates = self._normalize_templates(templates)
         settings = {"smtp_server": self.smtp_server_var.get(), "smtp_port": port, "smtp_user": self.smtp_user_var.get(), "smtp_password": self.smtp_password_var.get(), "recipient_email": self.recipient_email_var.get(), "reminders_enabled": self.reminders_enabled_var.get(), "reminder_time": self.reminder_time_var.get(), "templates": templates}
         self.templates = templates
+        if hasattr(self, 'templates_text'):
+            self.templates_text.delete("1.0", tk.END)
+            formatted = "\n".join(self._format_template_line(tpl) for tpl in self.templates)
+            self.templates_text.insert(tk.END, formatted)
         settings_manager.save_settings(settings)
         messagebox.showinfo("Sukces", "Ustawienia zostały zapisane. Aplikacja może wymagać ponownego uruchomienia, aby zmiany w harmonogramie zostały zastosowane.")
         self.draw_calendar_view()
