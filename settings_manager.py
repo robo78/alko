@@ -10,7 +10,8 @@ DEFAULT_SETTINGS = {
     "smtp_password": "",
     "recipient_email": "",
     "reminders_enabled": False,
-    "reminder_time": "20:00"
+    "reminder_time": "20:00",
+    "templates": []
 }
 
 def load_settings():
