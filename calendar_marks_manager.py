@@ -5,13 +5,13 @@ from typing import Dict, Optional
 
 def _normalize_mark_value(value):
     if isinstance(value, dict):
-        return {
-            "scale": str(value.get("scale", "")) if value.get("scale") is not None else "",
-            "template": str(value.get("template", "")) if value.get("template") is not None else "",
-        }
+        scale = value.get("scale")
+        if scale is None and value.get("template"):
+            scale = ""
+        return {"scale": str(scale) if scale is not None else ""}
     if isinstance(value, str):
-        return {"scale": value, "template": ""}
-    return {"scale": "", "template": ""}
+        return {"scale": value}
+    return {"scale": ""}
 
 MARKS_FILE = 'calendar_marks.json'
 
@@ -71,6 +71,15 @@ def get_mark(
         save_marks(marks)
     return normalized
 
+def get_scale(
+    date_key: str,
+    symptom: str,
+    marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+) -> Optional[str]:
+    mark = get_mark(date_key, symptom, marks)
+    if mark is None:
+        return None
+    return mark.get("scale") or None
 
 def get_scale(
     date_key: str,
@@ -83,23 +92,11 @@ def get_scale(
     return mark.get("scale") or None
 
 
-def get_template_name(
-    date_key: str,
-    symptom: str,
-    marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
-) -> Optional[str]:
-    mark = get_mark(date_key, symptom, marks)
-    if mark is None:
-        return None
-    return mark.get("template") or None
-
-
 def update_mark(
     date_key: str,
     symptom: str,
     *,
     scale: Optional[str] = None,
-    template: Optional[str] = None,
     marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
 ) -> Dict[str, Dict[str, Dict[str, str]]]:
     marks = load_marks() if marks is None else marks
@@ -107,8 +104,6 @@ def update_mark(
     current = _normalize_mark_value(day_marks.get(symptom, {}))
     if scale is not None:
         current["scale"] = scale
-    if template is not None:
-        current["template"] = template
     day_marks[symptom] = current
     save_marks(marks)
     return marks
@@ -118,10 +113,9 @@ def set_mark(
     date_key: str,
     symptom: str,
     scale: str = '',
-    template: str = '',
     marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
 ) -> Dict[str, Dict[str, Dict[str, str]]]:
-    return update_mark(date_key, symptom, scale=scale, template=template, marks=marks)
+    return update_mark(date_key, symptom, scale=scale, marks=marks)
 
 
 def remove_mark(

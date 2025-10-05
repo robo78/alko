@@ -11,8 +11,7 @@ DEFAULT_SETTINGS = {
     "recipient_email": "",
     "reminders_enabled": False,
     "reminder_time": "20:00",
-    "templates": [],
-    "font_size": 10,
+    "font_size": 12,
 }
 
 def load_settings():

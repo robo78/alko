@@ -22,10 +22,9 @@ class CravingApp:
         self.root.title("Dzienniczek Głodów Alkoholowych")
         self.root.geometry("1200x800")
         self.selected_symptoms = []
-        self.templates = []
-        self.default_template_background = "#ff7979"
-        self.default_template_foreground = "#000000"
-        self.font_size = 10
+        self.font_size = 12
+        self.mark_background = "#ff6b6b"
+        self.mark_foreground = "#ffffff"
         self._font_cache = {}
         self.cell_marks = calendar_marks_manager.load_marks()
         self.current_date = datetime.now()
@@ -63,8 +62,8 @@ class CravingApp:
         reminder_scheduler.start_scheduler_thread()
 
     def _update_font_cache(self):
-        base_size = max(8, int(self.font_size))
-        title_size = max(base_size + 4, 12)
+        base_size = max(12, int(self.font_size))
+        title_size = max(base_size + 4, 16)
         if not self._font_cache:
             self._font_cache = {
                 "base": tkfont.Font(family="Helvetica", size=base_size),
@@ -183,8 +182,7 @@ class CravingApp:
             self.draw_calendar_view()
             self.open_cell_menu(event, symptom, day_num, date_str=date_str, previous_value=previous_value)
         else:
-            default_template = self.templates[0]["name"] if self.templates else ""
-            self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, template=default_template, marks=self.cell_marks)
+            self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, marks=self.cell_marks)
         self._apply_cell_visuals(symptom, day_num)
 
     def open_cell_menu(self, event, symptom, day_num, date_str=None, previous_value=None):
@@ -196,12 +194,11 @@ class CravingApp:
         if is_marked:
             menu.add_command(label="Usuń zaznaczenie", command=lambda: self.remove_cell_mark(date_str, symptom))
         else:
-            menu.add_command(label="Zaznacz głód", command=lambda: self.assign_template(date_str, symptom, self.templates[0]["name"] if self.templates else ""))
+            menu.add_command(label="Zaznacz głód", command=lambda: self.add_basic_mark(date_str, symptom))
 
         scale_menu = tk.Menu(menu, tearoff=0)
         current_mark = calendar_marks_manager.get_mark(date_str, symptom, self.cell_marks)
         current_value = current_mark.get("scale") if current_mark else None
-        current_template = current_mark.get("template") if current_mark else None
         if current_value:
             menu.add_command(label=f"Aktualna skala: {current_value}", state="disabled")
             menu.add_separator()
@@ -211,18 +208,6 @@ class CravingApp:
                 label=f"{level}",
                 command=lambda l=level: self.assign_scale(date_str, symptom, l)
             )
-
-        if self.templates:
-            templates_menu = tk.Menu(menu, tearoff=0)
-            for template in self.templates:
-                label = template["name"]
-                if current_template and current_template == label:
-                    label = f"{label} (aktywny)"
-                templates_menu.add_command(
-                    label=label,
-                    command=lambda t=template["name"]: self.assign_template(date_str, symptom, t)
-                )
-            menu.add_cascade(label="Szablony", menu=templates_menu)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -303,20 +288,12 @@ class CravingApp:
         for cell in getattr(self, "_calendar_cells", []):
             cell.original_bg = cell.original_bg if hasattr(cell, "original_bg") else cell.cget("bg")
 
-    def _get_template_by_name(self, name):
-        if not name:
-            return None
-        for template in self.templates:
-            if template.get("name") == name:
-                return template
-        return None
-
     def _normalize_font_size(self, value):
         try:
             size = int(value)
         except (TypeError, ValueError):
             size = self.font_size
-        return max(8, min(32, size))
+        return max(12, min(36, size))
 
     def _get_font(self, weight="normal"):
         self._update_font_cache()
@@ -353,14 +330,9 @@ class CravingApp:
         text_color = "#000000"
         cell_text = ""
         if mark_data is not None:
-            template_name = mark_data.get("template")
             scale_value = mark_data.get("scale")
-            template_info = self._get_template_by_name(template_name) if template_name else None
-            if template_info:
-                cell_color = template_info.get("background", cell_color)
-                text_color = template_info.get("foreground", text_color)
-            else:
-                cell_color = "#ff7979"
+            cell_color = self.mark_background
+            text_color = self.mark_foreground
             cell_text = scale_value if scale_value else "✓"
         triggers_for_day = self._current_month_triggers.get(day_num)
         if triggers_for_day and symptom in triggers_for_day and mark_data is None:
@@ -377,62 +349,8 @@ class CravingApp:
         cell.original_fg = text_color
         cell.configure(highlightthickness=cell.original_highlightthickness, highlightbackground="#b3b3b3")
 
-    def _normalize_templates(self, templates_raw):
-        normalized = []
-        for item in templates_raw:
-            if isinstance(item, dict):
-                name = str(item.get("name", "")).strip()
-                if not name:
-                    continue
-                background = item.get("background") or item.get("bg") or self.default_template_background
-                foreground = item.get("foreground") or item.get("fg") or self.default_template_foreground
-                normalized.append({
-                    "name": name,
-                    "background": background,
-                    "foreground": foreground,
-                })
-            elif isinstance(item, str):
-                name = item.strip()
-                if not name:
-                    continue
-                normalized.append({
-                    "name": name,
-                    "background": self.default_template_background,
-                    "foreground": self.default_template_foreground,
-                })
-        return normalized
-
-    def _format_template_line(self, template):
-        name = template.get("name", "")
-        background = template.get("background", self.default_template_background)
-        foreground = template.get("foreground", self.default_template_foreground)
-        if foreground == self.default_template_foreground:
-            return f"{name};{background}"
-        return f"{name};{background};{foreground}"
-
-    def _parse_templates_input(self, raw_text):
-        templates = []
-        for line in raw_text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = [part.strip() for part in line.split(';')]
-            if not parts:
-                continue
-            name = parts[0]
-            if not name:
-                continue
-            background = parts[1] if len(parts) > 1 and parts[1] else self.default_template_background
-            foreground = parts[2] if len(parts) > 2 and parts[2] else self.default_template_foreground
-            templates.append({
-                "name": name,
-                "background": background,
-                "foreground": foreground,
-            })
-        return templates
-
-    def assign_template(self, date_str, symptom, template):
-        self.cell_marks = calendar_marks_manager.update_mark(date_str, symptom, template=template, marks=self.cell_marks)
+    def add_basic_mark(self, date_str, symptom):
+        self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, marks=self.cell_marks)
         try:
             day_num = int(date_str.split('-')[2])
         except (IndexError, ValueError):
@@ -600,23 +518,14 @@ class CravingApp:
         ttk.Checkbutton(reminder_frame, text="Włącz codzienne przypomnienia", variable=self.reminders_enabled_var).grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="w")
         ttk.Label(reminder_frame, text="Godzina przypomnienia (HH:MM):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         ttk.Entry(reminder_frame, textvariable=self.reminder_time_var).grid(row=1, column=1, padx=5, pady=5, sticky="w")
-        templates_frame = ttk.LabelFrame(self.settings_frame, text="Szablony zaznaczeń")
-        templates_frame.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
-        ttk.Label(
-            templates_frame,
-            text="Podaj szablony kolorów w formacie: nazwa;#kolor_tła;#kolor_tekstu (ostatni parametr opcjonalny)"
-        ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.templates_text = tk.Text(templates_frame, height=5, width=40)
-        self.templates_text.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
-        templates_frame.columnconfigure(0, weight=1)
         appearance_frame = ttk.LabelFrame(self.settings_frame, text="Wygląd")
-        appearance_frame.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
-        ttk.Label(appearance_frame, text="Rozmiar czcionki (8-32):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        appearance_frame.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+        ttk.Label(appearance_frame, text="Rozmiar czcionki (12-36):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.font_size_var = tk.IntVar(value=self.font_size)
         self.font_size_spinbox = tk.Spinbox(
             appearance_frame,
-            from_=8,
-            to=32,
+            from_=12,
+            to=36,
             increment=1,
             textvariable=self.font_size_var,
             width=5,
@@ -624,8 +533,8 @@ class CravingApp:
         )
         self.font_size_spinbox.grid(row=0, column=1, padx=5, pady=5, sticky="w")
         appearance_frame.columnconfigure(1, weight=1)
-        ttk.Button(self.settings_frame, text="Zapisz Ustawienia", command=self.save_app_settings).grid(row=4, column=0, padx=10, pady=10)
-        ttk.Button(self.settings_frame, text="Wyślij E-mail Testowy", command=self.send_test_email_action).grid(row=5, column=0, padx=10, pady=10)
+        ttk.Button(self.settings_frame, text="Zapisz Ustawienia", command=self.save_app_settings).grid(row=3, column=0, padx=10, pady=10)
+        ttk.Button(self.settings_frame, text="Wyślij E-mail Testowy", command=self.send_test_email_action).grid(row=4, column=0, padx=10, pady=10)
 
     def load_app_settings(self):
         settings = settings_manager.load_settings()
@@ -639,11 +548,6 @@ class CravingApp:
         self.font_size = self._normalize_font_size(settings.get("font_size", self.font_size))
         if hasattr(self, "font_size_var"):
             self.font_size_var.set(self.font_size)
-        self.templates = self._normalize_templates(settings.get("templates", []))
-        if hasattr(self, 'templates_text'):
-            self.templates_text.delete("1.0", tk.END)
-            formatted = "\n".join(self._format_template_line(tpl) for tpl in self.templates)
-            self.templates_text.insert(tk.END, formatted)
         self._apply_current_fonts()
 
     def save_app_settings(self):
@@ -652,8 +556,6 @@ class CravingApp:
         except ValueError:
             messagebox.showerror("Błąd", "Port SMTP musi być liczbą.")
             return
-        templates_raw = self.templates_text.get("1.0", tk.END) if hasattr(self, 'templates_text') else ""
-        templates = self._normalize_templates(self._parse_templates_input(templates_raw))
         font_size_value = self._normalize_font_size(self.font_size_var.get() if hasattr(self, 'font_size_var') else self.font_size)
         self.font_size = font_size_value
         settings = {
@@ -664,14 +566,8 @@ class CravingApp:
             "recipient_email": self.recipient_email_var.get(),
             "reminders_enabled": self.reminders_enabled_var.get(),
             "reminder_time": self.reminder_time_var.get(),
-            "templates": templates,
             "font_size": font_size_value,
         }
-        self.templates = templates
-        if hasattr(self, 'templates_text'):
-            self.templates_text.delete("1.0", tk.END)
-            formatted = "\n".join(self._format_template_line(tpl) for tpl in self.templates)
-            self.templates_text.insert(tk.END, formatted)
         settings_manager.save_settings(settings)
         self._apply_current_fonts()
         messagebox.showinfo(
