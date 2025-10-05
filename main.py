@@ -13,6 +13,9 @@ import subprocess
 import pandas as pd
 
 class CravingApp:
+    _ENTRY_TS_KEY = "_timestamp_dt"
+    _ENTRY_TRIGGERS_KEY = "_triggers_list"
+
     def __init__(self, root):
         self.root = root
         self.root.title("Dzienniczek Głodów Alkoholowych")
@@ -29,6 +32,9 @@ class CravingApp:
         self._resizing_symptom_column = False
         self._resizer_width = 6
         self._calendar_cells = []
+        self._raw_entries = []
+        self._enriched_entries = []
+        self._month_trigger_cache = {}
 
         # --- Main Layout ---
         self.style = ttk.Style()
@@ -69,13 +75,7 @@ class CravingApp:
             widget.destroy()
         self.month_year_label.config(text=self.current_date.strftime("%B %Y"))
 
-        all_entries = data_manager.load_cravings()
-        df = pd.DataFrame(all_entries)
-        if not df.empty and 'timestamp' in df.columns:
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            month_df = df[df['timestamp'].dt.to_period('M') == pd.Period(self.current_date, 'M')]
-        else:
-            month_df = pd.DataFrame()
+        month_day_triggers = self._get_month_trigger_lookup(self.current_date)
 
         days_in_month = calendar.monthrange(self.current_date.year, self.current_date.month)[1]
         self._days_in_current_month = days_in_month
@@ -112,8 +112,6 @@ class CravingApp:
             day_button.configure(style="Day.TButton")
             day_button.grid(row=0, column=day_num + 1, sticky="nsew")
 
-        self.cell_marks = calendar_marks_manager.load_marks()
-
         for i, symptom in enumerate(symptoms.SYMPTOM_LIST, start=1):
             symptom_label = ttk.Label(
                 self.calendar_frame,
@@ -143,12 +141,9 @@ class CravingApp:
                     else:
                         cell_color = "#ff7979"
                     cell_text = scale_value if scale_value else "✓"
-                if not month_df.empty:
-                    day_entries = month_df[month_df['timestamp'].dt.day == day_num]
-                    if not day_entries.empty and 'triggers' in day_entries.columns:
-                        symptom_present = day_entries['triggers'].str.contains(symptom, na=False).any()
-                        if symptom_present and mark_data is None:
-                            cell_color = "#ffb3b3"
+                triggers_for_day = month_day_triggers.get(day_num)
+                if triggers_for_day and symptom in triggers_for_day and mark_data is None:
+                    cell_color = "#ffb3b3"
                 cell = tk.Label(
                     self.calendar_frame,
                     bg=cell_color,
@@ -493,6 +488,7 @@ class CravingApp:
             self.symptoms_display.config(state="disabled")
 
     def load_entries(self):
+        self._refresh_entries()
         self.draw_calendar_view()
         self.update_analysis_tab()
 
@@ -520,7 +516,7 @@ class CravingApp:
         self.analysis_frame.rowconfigure(1, weight=1)
 
     def update_analysis_tab(self):
-        entries = data_manager.load_cravings()
+        entries = list(self._raw_entries)
         stats = analysis.get_summary_stats(entries)
         self.total_entries_label.config(text=f"Liczba wpisów: {stats['total_entries']}")
         self.avg_intensity_label.config(text=f"Średnia intensywność: {stats['avg_intensity']}")
@@ -606,7 +602,6 @@ class CravingApp:
             formatted = "\n".join(self._format_template_line(tpl) for tpl in self.templates)
             self.templates_text.insert(tk.END, formatted)
         self._apply_current_fonts()
-        self.draw_calendar_view()
 
     def save_app_settings(self):
         try:
@@ -641,6 +636,59 @@ class CravingApp:
             "Ustawienia zostały zapisane. Aplikacja może wymagać ponownego uruchomienia, aby zmiany w harmonogramie zostały zastosowane."
         )
         self.draw_calendar_view()
+
+    def _refresh_entries(self):
+        raw_entries = data_manager.load_cravings()
+        self._raw_entries = raw_entries
+        enriched = []
+        for entry in raw_entries:
+            entry_copy = dict(entry)
+            parsed_timestamp = self._parse_timestamp(entry_copy.get('timestamp'))
+            triggers_list = self._split_triggers(entry_copy.get('triggers', ''))
+            entry_copy[self._ENTRY_TS_KEY] = parsed_timestamp
+            entry_copy[self._ENTRY_TRIGGERS_KEY] = triggers_list
+            enriched.append(entry_copy)
+        self._enriched_entries = enriched
+        self._month_trigger_cache.clear()
+
+    def _parse_timestamp(self, timestamp_value):
+        if isinstance(timestamp_value, datetime):
+            return timestamp_value
+        if timestamp_value in (None, ""):
+            return None
+        for parser in (
+            lambda value: datetime.strptime(value, "%Y-%m-%d %H:%M:%S"),
+            lambda value: datetime.fromisoformat(value),
+        ):
+            try:
+                return parser(str(timestamp_value))
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    def _split_triggers(self, trigger_string):
+        if not trigger_string:
+            return []
+        return [item.strip() for item in str(trigger_string).split(',') if item.strip()]
+
+    def _get_month_trigger_lookup(self, date):
+        key = (date.year, date.month)
+        cached = self._month_trigger_cache.get(key)
+        if cached is not None:
+            return cached
+        trigger_map = {}
+        for entry in self._enriched_entries:
+            timestamp = entry.get(self._ENTRY_TS_KEY)
+            if not timestamp or timestamp.year != date.year or timestamp.month != date.month:
+                continue
+            triggers = entry.get(self._ENTRY_TRIGGERS_KEY, [])
+            if not triggers:
+                continue
+            day_triggers = trigger_map.setdefault(timestamp.day, set())
+            day_triggers.update(triggers)
+        frozen_map = {day: frozenset(values) for day, values in trigger_map.items()}
+        self._month_trigger_cache[key] = frozen_map
+        return frozen_map
 
     def send_test_email_action(self):
         result = email_notifier.send_email("Testowy e-mail z Dzienniczka Głodów Alkoholowych", "To jest testowa wiadomość, aby sprawdzić, czy ustawienia e-mail są poprawne.")
