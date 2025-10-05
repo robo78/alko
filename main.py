@@ -21,6 +21,7 @@ class CravingApp:
         self.templates = []
         self.default_template_background = "#ff7979"
         self.default_template_foreground = "#000000"
+        self.font_size = 10
         self.cell_marks = calendar_marks_manager.load_marks()
         self.current_date = datetime.now()
         self.scale_levels = [str(level) for level in range(1, 11)]
@@ -30,6 +31,8 @@ class CravingApp:
         self._calendar_cells = []
 
         # --- Main Layout ---
+        self.style = ttk.Style()
+
         self.notebook = ttk.Notebook(root)
         self.notebook.pack(pady=10, padx=10, fill="both", expand=True)
 
@@ -53,7 +56,7 @@ class CravingApp:
         control_frame = ttk.Frame(self.journal_frame)
         control_frame.pack(fill='x', padx=10, pady=5)
         ttk.Button(control_frame, text="< Poprzedni Miesiąc", command=self.prev_month).pack(side='left')
-        self.month_year_label = ttk.Label(control_frame, text="", font=("Helvetica", 14, "bold"))
+        self.month_year_label = ttk.Label(control_frame, text="", font=self._get_title_font())
         self.month_year_label.pack(side='left', expand=True)
         ttk.Button(control_frame, text="Następny Miesiąc >", command=self.next_month).pack(side='right')
 
@@ -83,7 +86,7 @@ class CravingApp:
         header_label = ttk.Label(
             self.calendar_frame,
             text="Objaw / Wyzwalacz",
-            font=("Helvetica", 10, "bold"),
+            font=self._get_font(weight="bold"),
             relief="solid",
             borderwidth=1,
             padding=5,
@@ -101,7 +104,12 @@ class CravingApp:
 
         for day_num in range(1, days_in_month + 1):
             date = datetime(self.current_date.year, self.current_date.month, day_num)
-            day_button = ttk.Button(self.calendar_frame, text=str(day_num), command=lambda d=date: self.open_new_entry_window(d))
+            day_button = ttk.Button(
+                self.calendar_frame,
+                text=str(day_num),
+                command=lambda d=date: self.open_new_entry_window(d)
+            )
+            day_button.configure(style="Day.TButton")
             day_button.grid(row=0, column=day_num + 1, sticky="nsew")
 
         self.cell_marks = calendar_marks_manager.load_marks()
@@ -114,7 +122,8 @@ class CravingApp:
                 relief="solid",
                 borderwidth=1,
                 padding=5,
-                anchor="w"
+                anchor="w",
+                font=self._get_font()
             )
             symptom_label.grid(row=i, column=0, sticky="nsew")
             self.symptom_labels.append(symptom_label)
@@ -140,16 +149,31 @@ class CravingApp:
                         symptom_present = day_entries['triggers'].str.contains(symptom, na=False).any()
                         if symptom_present and mark_data is None:
                             cell_color = "#ffb3b3"
-                cell = tk.Label(self.calendar_frame, bg=cell_color, fg=text_color, relief="solid", borderwidth=1, text=cell_text)
+                cell = tk.Label(
+                    self.calendar_frame,
+                    bg=cell_color,
+                    fg=text_color,
+                    relief="solid",
+                    borderwidth=1,
+                    text=cell_text,
+                    font=self._get_font()
+                )
                 cell.grid(row=i, column=day_num + 1, sticky="nsew")
-                cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(s, d))
+                cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(e, s, d))
                 cell.bind("<Button-3>", lambda e, s=symptom, d=day_num: self.open_cell_menu(e, s, d))
                 cell.bind("<Enter>", lambda e, c=cell: self._on_cell_enter(c))
                 cell.bind("<Leave>", lambda e, c=cell: self._on_cell_leave(c))
                 cell.original_bg = cell_color
                 cell.original_fg = text_color
+                initial_thickness = int(cell.cget("highlightthickness") or 0)
+                cell.original_highlightthickness = max(1, initial_thickness)
+                cell.configure(
+                    cursor="hand2",
+                    highlightthickness=cell.original_highlightthickness,
+                    highlightbackground="#b3b3b3"
+                )
+                cell.original_highlightbackground = "#b3b3b3"
                 self._calendar_cells.append(cell)
-                cell.configure(cursor="hand2")
 
         self.calendar_frame.grid_columnconfigure(0, weight=0, minsize=self.symptom_column_width)
         self.calendar_frame.grid_columnconfigure(1, weight=0, minsize=self._resizer_width)
@@ -157,10 +181,13 @@ class CravingApp:
             self.calendar_frame.grid_columnconfigure(col, weight=1, uniform="group1")
         for row in range(len(symptoms.SYMPTOM_LIST) + 1):
             self.calendar_frame.grid_rowconfigure(row, weight=1, uniform="group1")
+        self._apply_current_fonts()
 
         self.calendar_frame.after_idle(lambda: self._on_calendar_resize(None))
 
-    def handle_cell_click(self, symptom, day_num):
+    def handle_cell_click(self, event, symptom, day_num):
+        if event:
+            event.widget.focus_set()
         date = datetime(self.current_date.year, self.current_date.month, day_num)
         date_str = date.strftime("%Y-%m-%d")
         if calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks):
@@ -239,10 +266,18 @@ class CravingApp:
     def _on_cell_enter(self, cell):
         original_bg = getattr(cell, "original_bg", cell.cget("bg"))
         hover_color = self._calculate_hover_color(original_bg)
-        cell.configure(bg=hover_color)
+        cell.configure(
+            bg=hover_color,
+            highlightthickness=max(2, getattr(cell, "original_highlightthickness", 1)),
+            highlightbackground="#333333"
+        )
 
     def _on_cell_leave(self, cell):
-        cell.configure(bg=getattr(cell, "original_bg", cell.cget("bg")))
+        cell.configure(
+            bg=getattr(cell, "original_bg", cell.cget("bg")),
+            highlightthickness=getattr(cell, "original_highlightthickness", 1),
+            highlightbackground=getattr(cell, "original_highlightbackground", "#b3b3b3")
+        )
 
     def _calculate_hover_color(self, hex_color):
         if not hex_color.startswith("#") or len(hex_color) not in (4, 7):
@@ -255,7 +290,7 @@ class CravingApp:
             b = int(hex_color[5:7], 16)
         except ValueError:
             return "#d9d9d9"
-        lighten = lambda component: min(255, int(component + (255 - component) * 0.2))
+        lighten = lambda component: min(255, int(component + (255 - component) * 0.35))
         hover_r = lighten(r)
         hover_g = lighten(g)
         hover_b = lighten(b)
@@ -288,6 +323,36 @@ class CravingApp:
             if template.get("name") == name:
                 return template
         return None
+
+    def _normalize_font_size(self, value):
+        try:
+            size = int(value)
+        except (TypeError, ValueError):
+            size = self.font_size
+        return max(8, min(32, size))
+
+    def _get_font(self, weight="normal"):
+        size = max(8, int(self.font_size))
+        weight = (weight or "").lower()
+        if weight == "bold":
+            return ("Helvetica", size, "bold")
+        return ("Helvetica", size)
+
+    def _get_title_font(self):
+        base_size = max(8, int(self.font_size))
+        return ("Helvetica", max(base_size + 4, 12), "bold")
+
+    def _apply_current_fonts(self):
+        if hasattr(self, "month_year_label"):
+            self.month_year_label.configure(font=self._get_title_font())
+        if hasattr(self, "style"):
+            self.style.configure("Day.TButton", font=self._get_font())
+        if hasattr(self, "_symptom_header_label"):
+            self._symptom_header_label.configure(font=self._get_font(weight="bold"))
+        for label in getattr(self, "symptom_labels", []):
+            label.configure(font=self._get_font())
+        for cell in getattr(self, "_calendar_cells", []):
+            cell.configure(font=self._get_font())
 
     def _normalize_templates(self, templates_raw):
         normalized = []
@@ -505,8 +570,23 @@ class CravingApp:
         self.templates_text = tk.Text(templates_frame, height=5, width=40)
         self.templates_text.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
         templates_frame.columnconfigure(0, weight=1)
-        ttk.Button(self.settings_frame, text="Zapisz Ustawienia", command=self.save_app_settings).grid(row=3, column=0, padx=10, pady=10)
-        ttk.Button(self.settings_frame, text="Wyślij E-mail Testowy", command=self.send_test_email_action).grid(row=4, column=0, padx=10, pady=10)
+        appearance_frame = ttk.LabelFrame(self.settings_frame, text="Wygląd")
+        appearance_frame.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
+        ttk.Label(appearance_frame, text="Rozmiar czcionki (8-32):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.font_size_var = tk.IntVar(value=self.font_size)
+        self.font_size_spinbox = tk.Spinbox(
+            appearance_frame,
+            from_=8,
+            to=32,
+            increment=1,
+            textvariable=self.font_size_var,
+            width=5,
+            wrap=False
+        )
+        self.font_size_spinbox.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        appearance_frame.columnconfigure(1, weight=1)
+        ttk.Button(self.settings_frame, text="Zapisz Ustawienia", command=self.save_app_settings).grid(row=4, column=0, padx=10, pady=10)
+        ttk.Button(self.settings_frame, text="Wyślij E-mail Testowy", command=self.send_test_email_action).grid(row=5, column=0, padx=10, pady=10)
 
     def load_app_settings(self):
         settings = settings_manager.load_settings()
@@ -517,27 +597,49 @@ class CravingApp:
         self.recipient_email_var.set(settings.get("recipient_email", ""))
         self.reminders_enabled_var.set(settings.get("reminders_enabled", False))
         self.reminder_time_var.set(settings.get("reminder_time", "20:00"))
+        self.font_size = self._normalize_font_size(settings.get("font_size", self.font_size))
+        if hasattr(self, "font_size_var"):
+            self.font_size_var.set(self.font_size)
         self.templates = self._normalize_templates(settings.get("templates", []))
         if hasattr(self, 'templates_text'):
             self.templates_text.delete("1.0", tk.END)
             formatted = "\n".join(self._format_template_line(tpl) for tpl in self.templates)
             self.templates_text.insert(tk.END, formatted)
+        self._apply_current_fonts()
         self.draw_calendar_view()
 
     def save_app_settings(self):
-        try: port = int(self.smtp_port_var.get())
-        except ValueError: messagebox.showerror("Błąd", "Port SMTP musi być liczbą."); return
+        try:
+            port = int(self.smtp_port_var.get())
+        except ValueError:
+            messagebox.showerror("Błąd", "Port SMTP musi być liczbą.")
+            return
         templates_raw = self.templates_text.get("1.0", tk.END) if hasattr(self, 'templates_text') else ""
-        templates = self._parse_templates_input(templates_raw)
-        templates = self._normalize_templates(templates)
-        settings = {"smtp_server": self.smtp_server_var.get(), "smtp_port": port, "smtp_user": self.smtp_user_var.get(), "smtp_password": self.smtp_password_var.get(), "recipient_email": self.recipient_email_var.get(), "reminders_enabled": self.reminders_enabled_var.get(), "reminder_time": self.reminder_time_var.get(), "templates": templates}
+        templates = self._normalize_templates(self._parse_templates_input(templates_raw))
+        font_size_value = self._normalize_font_size(self.font_size_var.get() if hasattr(self, 'font_size_var') else self.font_size)
+        self.font_size = font_size_value
+        settings = {
+            "smtp_server": self.smtp_server_var.get(),
+            "smtp_port": port,
+            "smtp_user": self.smtp_user_var.get(),
+            "smtp_password": self.smtp_password_var.get(),
+            "recipient_email": self.recipient_email_var.get(),
+            "reminders_enabled": self.reminders_enabled_var.get(),
+            "reminder_time": self.reminder_time_var.get(),
+            "templates": templates,
+            "font_size": font_size_value,
+        }
         self.templates = templates
         if hasattr(self, 'templates_text'):
             self.templates_text.delete("1.0", tk.END)
             formatted = "\n".join(self._format_template_line(tpl) for tpl in self.templates)
             self.templates_text.insert(tk.END, formatted)
         settings_manager.save_settings(settings)
-        messagebox.showinfo("Sukces", "Ustawienia zostały zapisane. Aplikacja może wymagać ponownego uruchomienia, aby zmiany w harmonogramie zostały zastosowane.")
+        self._apply_current_fonts()
+        messagebox.showinfo(
+            "Sukces",
+            "Ustawienia zostały zapisane. Aplikacja może wymagać ponownego uruchomienia, aby zmiany w harmonogramie zostały zastosowane."
+        )
         self.draw_calendar_view()
 
     def send_test_email_action(self):
