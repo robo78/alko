@@ -26,6 +26,8 @@ class CravingApp:
         self.scale_levels = [str(level) for level in range(1, 11)]
         self.symptom_column_width = 200
         self._resizing_symptom_column = False
+        self._resizer_width = 6
+        self._calendar_cells = []
 
         # --- Main Layout ---
         self.notebook = ttk.Notebook(root)
@@ -57,6 +59,7 @@ class CravingApp:
 
         self.calendar_frame = ttk.Frame(self.journal_frame)
         self.calendar_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.calendar_frame.bind("<Configure>", self._on_calendar_resize)
 
     def draw_calendar_view(self):
         for widget in self.calendar_frame.winfo_children():
@@ -72,8 +75,10 @@ class CravingApp:
             month_df = pd.DataFrame()
 
         days_in_month = calendar.monthrange(self.current_date.year, self.current_date.month)[1]
+        self._days_in_current_month = days_in_month
 
         self.symptom_labels = []
+        self._calendar_cells = []
 
         header_label = ttk.Label(
             self.calendar_frame,
@@ -87,7 +92,7 @@ class CravingApp:
         header_label.grid(row=0, column=0, sticky="nsew")
         header_label.configure(wraplength=self.symptom_column_width - 10)
 
-        resizer = tk.Frame(self.calendar_frame, width=6, cursor="sb_h_double_arrow", bg="#d0d0d0")
+        resizer = tk.Frame(self.calendar_frame, width=self._resizer_width, cursor="sb_h_double_arrow", bg="#d0d0d0")
         resizer.grid(row=0, column=1, rowspan=len(symptoms.SYMPTOM_LIST) + 1, sticky="ns")
         resizer.bind("<ButtonPress-1>", self.start_resizing_symptom_column)
         resizer.bind("<B1-Motion>", self.perform_resizing_symptom_column)
@@ -137,33 +142,35 @@ class CravingApp:
                             cell_color = "#ffb3b3"
                 cell = tk.Label(self.calendar_frame, bg=cell_color, fg=text_color, relief="solid", borderwidth=1, text=cell_text)
                 cell.grid(row=i, column=day_num + 1, sticky="nsew")
-                cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(e, s, d))
+                cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(s, d))
                 cell.bind("<Button-3>", lambda e, s=symptom, d=day_num: self.open_cell_menu(e, s, d))
+                cell.bind("<Enter>", lambda e, c=cell: self._on_cell_enter(c))
+                cell.bind("<Leave>", lambda e, c=cell: self._on_cell_leave(c))
+                cell.original_bg = cell_color
+                cell.original_fg = text_color
+                self._calendar_cells.append(cell)
                 cell.configure(cursor="hand2")
 
         self.calendar_frame.grid_columnconfigure(0, weight=0, minsize=self.symptom_column_width)
-        self.calendar_frame.grid_columnconfigure(1, weight=0, minsize=6)
+        self.calendar_frame.grid_columnconfigure(1, weight=0, minsize=self._resizer_width)
         for col in range(2, days_in_month + 2):
             self.calendar_frame.grid_columnconfigure(col, weight=1, uniform="group1")
         for row in range(len(symptoms.SYMPTOM_LIST) + 1):
             self.calendar_frame.grid_rowconfigure(row, weight=1, uniform="group1")
 
-    def handle_cell_click(self, event, symptom, day_num):
+        self.calendar_frame.after_idle(lambda: self._on_calendar_resize(None))
+
+    def handle_cell_click(self, symptom, day_num):
         date = datetime(self.current_date.year, self.current_date.month, day_num)
         date_str = date.strftime("%Y-%m-%d")
         if calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks):
-            previous_mark = calendar_marks_manager.get_mark(date_str, symptom, self.cell_marks)
-            previous_value = previous_mark.get("scale") if previous_mark else None
             self.cell_marks = calendar_marks_manager.remove_mark(date_str, symptom, self.cell_marks)
-            self.draw_calendar_view()
-            self.open_cell_menu(event, symptom, day_num, date_str=date_str, previous_value=previous_value)
         else:
             default_template = self.templates[0]["name"] if self.templates else ""
             self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, template=default_template, marks=self.cell_marks)
-            self.draw_calendar_view()
-            self.open_cell_menu(event, symptom, day_num, date_str=date_str)
+        self.draw_calendar_view()
 
-    def open_cell_menu(self, event, symptom, day_num, date_str=None, previous_value=None):
+    def open_cell_menu(self, event, symptom, day_num, date_str=None):
         if date_str is None:
             date = datetime(self.current_date.year, self.current_date.month, day_num)
             date_str = date.strftime("%Y-%m-%d")
@@ -180,9 +187,6 @@ class CravingApp:
         current_template = current_mark.get("template") if current_mark else None
         if current_value:
             menu.add_command(label=f"Aktualna skala: {current_value}", state="disabled")
-            menu.add_separator()
-        elif previous_value:
-            menu.add_command(label=f"Poprzednia skala: {previous_value}", state="disabled")
             menu.add_separator()
         menu.add_cascade(label="Skala głodu", menu=scale_menu)
         for level in self.scale_levels:
@@ -224,9 +228,55 @@ class CravingApp:
             self._symptom_header_label.configure(wraplength=wrap_value)
         for label in getattr(self, "symptom_labels", []):
             label.configure(wraplength=wrap_value)
+        self._on_calendar_resize(None)
 
     def finish_resizing_symptom_column(self, event):
         self._resizing_symptom_column = False
+
+    def _on_cell_enter(self, cell):
+        original_bg = getattr(cell, "original_bg", cell.cget("bg"))
+        hover_color = self._calculate_hover_color(original_bg)
+        cell.configure(bg=hover_color)
+
+    def _on_cell_leave(self, cell):
+        cell.configure(bg=getattr(cell, "original_bg", cell.cget("bg")))
+
+    def _calculate_hover_color(self, hex_color):
+        if not hex_color.startswith("#") or len(hex_color) not in (4, 7):
+            return "#d9d9d9"
+        if len(hex_color) == 4:
+            hex_color = "#" + "".join(ch * 2 for ch in hex_color[1:])
+        try:
+            r = int(hex_color[1:3], 16)
+            g = int(hex_color[3:5], 16)
+            b = int(hex_color[5:7], 16)
+        except ValueError:
+            return "#d9d9d9"
+        lighten = lambda component: min(255, int(component + (255 - component) * 0.2))
+        hover_r = lighten(r)
+        hover_g = lighten(g)
+        hover_b = lighten(b)
+        return f"#{hover_r:02x}{hover_g:02x}{hover_b:02x}"
+
+    def _on_calendar_resize(self, event):
+        days_in_month = getattr(self, "_days_in_current_month", 0)
+        if not days_in_month:
+            return
+        total_width = max(1, self.calendar_frame.winfo_width())
+        total_height = max(1, self.calendar_frame.winfo_height())
+        row_count = len(symptoms.SYMPTOM_LIST) + 1
+        if row_count <= 0:
+            return
+        available_width = max(1, total_width - self.symptom_column_width - self._resizer_width)
+        available_height = max(1, total_height)
+        cell_size = min(available_width / days_in_month, available_height / row_count)
+        cell_size = max(1, cell_size)
+        for col in range(2, days_in_month + 2):
+            self.calendar_frame.grid_columnconfigure(col, minsize=int(cell_size))
+        for row in range(0, len(symptoms.SYMPTOM_LIST) + 1):
+            self.calendar_frame.grid_rowconfigure(row, minsize=int(cell_size))
+        for cell in getattr(self, "_calendar_cells", []):
+            cell.original_bg = cell.original_bg if hasattr(cell, "original_bg") else cell.cget("bg")
 
     def _get_template_by_name(self, name):
         if not name:
