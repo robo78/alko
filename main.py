@@ -21,6 +21,9 @@ class CravingApp:
         self.templates = []
         self.cell_marks = calendar_marks_manager.load_marks()
         self.current_date = datetime.now()
+        self.scale_levels = [str(level) for level in range(1, 11)]
+        self.symptom_column_width = 200
+        self._resizing_symptom_column = False
 
         # --- Main Layout ---
         self.notebook = ttk.Notebook(root)
@@ -68,18 +71,46 @@ class CravingApp:
 
         days_in_month = calendar.monthrange(self.current_date.year, self.current_date.month)[1]
 
-        ttk.Label(self.calendar_frame, text="Objaw / Wyzwalacz", font=("Helvetica", 10, "bold"), relief="solid", borderwidth=1, padding=5).grid(row=0, column=0, sticky="nsew")
+        self.symptom_labels = []
+
+        header_label = ttk.Label(
+            self.calendar_frame,
+            text="Objaw / Wyzwalacz",
+            font=("Helvetica", 10, "bold"),
+            relief="solid",
+            borderwidth=1,
+            padding=5,
+            anchor="w"
+        )
+        header_label.grid(row=0, column=0, sticky="nsew")
+        header_label.configure(wraplength=self.symptom_column_width - 10)
+
+        resizer = tk.Frame(self.calendar_frame, width=6, cursor="sb_h_double_arrow", bg="#d0d0d0")
+        resizer.grid(row=0, column=1, rowspan=len(symptoms.SYMPTOM_LIST) + 1, sticky="ns")
+        resizer.bind("<ButtonPress-1>", self.start_resizing_symptom_column)
+        resizer.bind("<B1-Motion>", self.perform_resizing_symptom_column)
+        resizer.bind("<ButtonRelease-1>", self.finish_resizing_symptom_column)
+        self._symptom_header_label = header_label
 
         for day_num in range(1, days_in_month + 1):
             date = datetime(self.current_date.year, self.current_date.month, day_num)
             day_button = ttk.Button(self.calendar_frame, text=str(day_num), command=lambda d=date: self.open_new_entry_window(d))
-            day_button.grid(row=0, column=day_num, sticky="nsew")
+            day_button.grid(row=0, column=day_num + 1, sticky="nsew")
 
         self.cell_marks = calendar_marks_manager.load_marks()
 
         for i, symptom in enumerate(symptoms.SYMPTOM_LIST, start=1):
-            symptom_label = ttk.Label(self.calendar_frame, text=symptom, wraplength=200, relief="solid", borderwidth=1, padding=5)
+            symptom_label = ttk.Label(
+                self.calendar_frame,
+                text=symptom,
+                wraplength=self.symptom_column_width - 10,
+                relief="solid",
+                borderwidth=1,
+                padding=5,
+                anchor="w"
+            )
             symptom_label.grid(row=i, column=0, sticky="nsew")
+            self.symptom_labels.append(symptom_label)
             for day_num in range(1, days_in_month + 1):
                 cell_color = "#f0f0f0"
                 cell_text = ""
@@ -95,13 +126,14 @@ class CravingApp:
                         if symptom_present:
                             cell_color = "#ffb3b3" if mark_template is None else cell_color
                 cell = tk.Label(self.calendar_frame, bg=cell_color, relief="solid", borderwidth=1, text=cell_text)
-                cell.grid(row=i, column=day_num, sticky="nsew")
+                cell.grid(row=i, column=day_num + 1, sticky="nsew")
                 cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(e, s, d))
                 cell.bind("<Button-3>", lambda e, s=symptom, d=day_num: self.open_cell_menu(e, s, d))
                 cell.configure(cursor="hand2")
 
-        self.calendar_frame.grid_columnconfigure(0, weight=1, uniform="group1")
-        for col in range(1, days_in_month + 1):
+        self.calendar_frame.grid_columnconfigure(0, weight=0, minsize=self.symptom_column_width)
+        self.calendar_frame.grid_columnconfigure(1, weight=0, minsize=6)
+        for col in range(2, days_in_month + 2):
             self.calendar_frame.grid_columnconfigure(col, weight=1, uniform="group1")
         for row in range(len(symptoms.SYMPTOM_LIST) + 1):
             self.calendar_frame.grid_rowconfigure(row, weight=1, uniform="group1")
@@ -110,14 +142,17 @@ class CravingApp:
         date = datetime(self.current_date.year, self.current_date.month, day_num)
         date_str = date.strftime("%Y-%m-%d")
         if calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks):
+            previous_value = calendar_marks_manager.get_template(date_str, symptom, self.cell_marks)
             self.cell_marks = calendar_marks_manager.remove_mark(date_str, symptom, self.cell_marks)
+            self.draw_calendar_view()
+            self.open_cell_menu(event, symptom, day_num, date_str=date_str, previous_value=previous_value)
         else:
             default_template = self.templates[0] if self.templates else ""
             self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, default_template, self.cell_marks)
-        self.draw_calendar_view()
-        self.open_cell_menu(event, symptom, day_num, date_str=date_str)
+            self.draw_calendar_view()
+            self.open_cell_menu(event, symptom, day_num, date_str=date_str)
 
-    def open_cell_menu(self, event, symptom, day_num, date_str=None):
+    def open_cell_menu(self, event, symptom, day_num, date_str=None, previous_value=None):
         if date_str is None:
             date = datetime(self.current_date.year, self.current_date.month, day_num)
             date_str = date.strftime("%Y-%m-%d")
@@ -125,20 +160,57 @@ class CravingApp:
         is_marked = calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks)
         if is_marked:
             menu.add_command(label="Usuń zaznaczenie", command=lambda: self.remove_cell_mark(date_str, symptom))
-            if self.templates:
-                menu.add_separator()
-                for template in self.templates:
-                    menu.add_command(label=f"Ustaw szablon: {template}", command=lambda t=template: self.assign_template(date_str, symptom, t))
         else:
             menu.add_command(label="Zaznacz głód", command=lambda: self.assign_template(date_str, symptom, self.templates[0] if self.templates else ""))
-            if self.templates:
-                menu.add_separator()
-                for template in self.templates:
-                    menu.add_command(label=f"Zaznacz jako: {template}", command=lambda t=template: self.assign_template(date_str, symptom, t))
+
+        scale_menu = tk.Menu(menu, tearoff=0)
+        current_value = calendar_marks_manager.get_template(date_str, symptom, self.cell_marks)
+        if current_value:
+            menu.add_command(label=f"Aktualna skala: {current_value}", state="disabled")
+            menu.add_separator()
+        elif previous_value:
+            menu.add_command(label=f"Poprzednia skala: {previous_value}", state="disabled")
+            menu.add_separator()
+        menu.add_cascade(label="Skala głodu", menu=scale_menu)
+        for level in self.scale_levels:
+            scale_menu.add_command(
+                label=f"{level}",
+                command=lambda l=level: self.assign_template(date_str, symptom, l)
+            )
+
+        if self.templates:
+            templates_menu = tk.Menu(menu, tearoff=0)
+            for template in self.templates:
+                templates_menu.add_command(
+                    label=template,
+                    command=lambda t=template: self.assign_template(date_str, symptom, t)
+                )
+            menu.add_cascade(label="Szablony", menu=templates_menu)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def start_resizing_symptom_column(self, event):
+        self._resizing_symptom_column = True
+        self._resize_start_x = event.x_root
+        self._initial_symptom_width = self.symptom_column_width
+
+    def perform_resizing_symptom_column(self, event):
+        if not self._resizing_symptom_column:
+            return
+        delta = event.x_root - self._resize_start_x
+        new_width = max(80, self._initial_symptom_width + delta)
+        self.symptom_column_width = new_width
+        self.calendar_frame.grid_columnconfigure(0, minsize=self.symptom_column_width)
+        wrap_value = max(10, self.symptom_column_width - 10)
+        if hasattr(self, "_symptom_header_label"):
+            self._symptom_header_label.configure(wraplength=wrap_value)
+        for label in getattr(self, "symptom_labels", []):
+            label.configure(wraplength=wrap_value)
+
+    def finish_resizing_symptom_column(self, event):
+        self._resizing_symptom_column = False
 
     def assign_template(self, date_str, symptom, template):
         self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, template, self.cell_marks)
