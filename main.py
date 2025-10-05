@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+from tkinter import font as tkfont
 import data_manager
 import analysis
 import settings_manager
@@ -25,6 +26,7 @@ class CravingApp:
         self.default_template_background = "#ff7979"
         self.default_template_foreground = "#000000"
         self.font_size = 10
+        self._font_cache = {}
         self.cell_marks = calendar_marks_manager.load_marks()
         self.current_date = datetime.now()
         self.scale_levels = [str(level) for level in range(1, 11)]
@@ -32,6 +34,8 @@ class CravingApp:
         self._resizing_symptom_column = False
         self._resizer_width = 6
         self._calendar_cells = []
+        self._cell_map = {}
+        self._current_month_triggers = {}
         self._raw_entries = []
         self._enriched_entries = []
         self._month_trigger_cache = {}
@@ -58,6 +62,21 @@ class CravingApp:
         self.load_entries()
         reminder_scheduler.start_scheduler_thread()
 
+    def _update_font_cache(self):
+        base_size = max(8, int(self.font_size))
+        title_size = max(base_size + 4, 12)
+        if not self._font_cache:
+            self._font_cache = {
+                "base": tkfont.Font(family="Helvetica", size=base_size),
+                "bold": tkfont.Font(family="Helvetica", size=base_size, weight="bold"),
+                "title": tkfont.Font(family="Helvetica", size=title_size, weight="bold"),
+            }
+        else:
+            self._font_cache["base"].configure(size=base_size)
+            self._font_cache["bold"].configure(size=base_size)
+            self._font_cache["title"].configure(size=title_size)
+        self.root.option_add("*Font", self._font_cache["base"])
+
     def create_journal_widgets(self):
         control_frame = ttk.Frame(self.journal_frame)
         control_frame.pack(fill='x', padx=10, pady=5)
@@ -76,12 +95,14 @@ class CravingApp:
         self.month_year_label.config(text=self.current_date.strftime("%B %Y"))
 
         month_day_triggers = self._get_month_trigger_lookup(self.current_date)
+        self._current_month_triggers = month_day_triggers
 
         days_in_month = calendar.monthrange(self.current_date.year, self.current_date.month)[1]
         self._days_in_current_month = days_in_month
 
         self.symptom_labels = []
         self._calendar_cells = []
+        self._cell_map = {}
 
         header_label = ttk.Label(
             self.calendar_frame,
@@ -126,49 +147,20 @@ class CravingApp:
             symptom_label.grid(row=i, column=0, sticky="nsew")
             self.symptom_labels.append(symptom_label)
             for day_num in range(1, days_in_month + 1):
-                cell_color = "#f0f0f0"
-                cell_text = ""
-                date_str = datetime(self.current_date.year, self.current_date.month, day_num).strftime("%Y-%m-%d")
-                mark_data = calendar_marks_manager.get_mark(date_str, symptom, self.cell_marks)
-                text_color = "#000000"
-                if mark_data is not None:
-                    template_name = mark_data.get("template")
-                    scale_value = mark_data.get("scale")
-                    template_info = self._get_template_by_name(template_name) if template_name else None
-                    if template_info:
-                        cell_color = template_info.get("background", cell_color)
-                        text_color = template_info.get("foreground", text_color)
-                    else:
-                        cell_color = "#ff7979"
-                    cell_text = scale_value if scale_value else "✓"
-                triggers_for_day = month_day_triggers.get(day_num)
-                if triggers_for_day and symptom in triggers_for_day and mark_data is None:
-                    cell_color = "#ffb3b3"
                 cell = tk.Label(
                     self.calendar_frame,
-                    bg=cell_color,
-                    fg=text_color,
                     relief="solid",
                     borderwidth=1,
-                    text=cell_text,
-                    font=self._get_font()
+                    cursor="hand2"
                 )
                 cell.grid(row=i, column=day_num + 1, sticky="nsew")
                 cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(e, s, d))
                 cell.bind("<Button-3>", lambda e, s=symptom, d=day_num: self.open_cell_menu(e, s, d))
                 cell.bind("<Enter>", lambda e, c=cell: self._on_cell_enter(c))
                 cell.bind("<Leave>", lambda e, c=cell: self._on_cell_leave(c))
-                cell.original_bg = cell_color
-                cell.original_fg = text_color
-                initial_thickness = int(cell.cget("highlightthickness") or 0)
-                cell.original_highlightthickness = max(1, initial_thickness)
-                cell.configure(
-                    cursor="hand2",
-                    highlightthickness=cell.original_highlightthickness,
-                    highlightbackground="#b3b3b3"
-                )
-                cell.original_highlightbackground = "#b3b3b3"
                 self._calendar_cells.append(cell)
+                self._cell_map[(symptom, day_num)] = cell
+                self._apply_cell_visuals(symptom, day_num, cell)
 
         self.calendar_frame.grid_columnconfigure(0, weight=0, minsize=self.symptom_column_width)
         self.calendar_frame.grid_columnconfigure(1, weight=0, minsize=self._resizer_width)
@@ -193,7 +185,7 @@ class CravingApp:
         else:
             default_template = self.templates[0]["name"] if self.templates else ""
             self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, template=default_template, marks=self.cell_marks)
-        self.draw_calendar_view()
+        self._apply_cell_visuals(symptom, day_num)
 
     def open_cell_menu(self, event, symptom, day_num, date_str=None, previous_value=None):
         if date_str is None:
@@ -327,17 +319,17 @@ class CravingApp:
         return max(8, min(32, size))
 
     def _get_font(self, weight="normal"):
-        size = max(8, int(self.font_size))
-        weight = (weight or "").lower()
-        if weight == "bold":
-            return ("Helvetica", size, "bold")
-        return ("Helvetica", size)
+        self._update_font_cache()
+        if (weight or "").lower() == "bold":
+            return self._font_cache["bold"]
+        return self._font_cache["base"]
 
     def _get_title_font(self):
-        base_size = max(8, int(self.font_size))
-        return ("Helvetica", max(base_size + 4, 12), "bold")
+        self._update_font_cache()
+        return self._font_cache["title"]
 
     def _apply_current_fonts(self):
+        self._update_font_cache()
         if hasattr(self, "month_year_label"):
             self.month_year_label.configure(font=self._get_title_font())
         if hasattr(self, "style"):
@@ -348,6 +340,42 @@ class CravingApp:
             label.configure(font=self._get_font())
         for cell in getattr(self, "_calendar_cells", []):
             cell.configure(font=self._get_font())
+
+    def _apply_cell_visuals(self, symptom, day_num, cell=None):
+        if cell is None:
+            cell = self._cell_map.get((symptom, day_num))
+        if cell is None:
+            return
+        date = datetime(self.current_date.year, self.current_date.month, day_num)
+        date_str = date.strftime("%Y-%m-%d")
+        mark_data = calendar_marks_manager.get_mark(date_str, symptom, self.cell_marks)
+        cell_color = "#f0f0f0"
+        text_color = "#000000"
+        cell_text = ""
+        if mark_data is not None:
+            template_name = mark_data.get("template")
+            scale_value = mark_data.get("scale")
+            template_info = self._get_template_by_name(template_name) if template_name else None
+            if template_info:
+                cell_color = template_info.get("background", cell_color)
+                text_color = template_info.get("foreground", text_color)
+            else:
+                cell_color = "#ff7979"
+            cell_text = scale_value if scale_value else "✓"
+        triggers_for_day = self._current_month_triggers.get(day_num)
+        if triggers_for_day and symptom in triggers_for_day and mark_data is None:
+            cell_color = "#ffb3b3"
+        self._update_font_cache()
+        cell.configure(bg=cell_color, fg=text_color, text=cell_text, font=self._get_font())
+        try:
+            initial_thickness = int(cell.cget("highlightthickness") or 0)
+        except (ValueError, tk.TclError, TypeError):
+            initial_thickness = 0
+        cell.original_highlightthickness = max(1, initial_thickness or 1)
+        cell.original_highlightbackground = "#b3b3b3"
+        cell.original_bg = cell_color
+        cell.original_fg = text_color
+        cell.configure(highlightthickness=cell.original_highlightthickness, highlightbackground="#b3b3b3")
 
     def _normalize_templates(self, templates_raw):
         normalized = []
@@ -405,15 +433,30 @@ class CravingApp:
 
     def assign_template(self, date_str, symptom, template):
         self.cell_marks = calendar_marks_manager.update_mark(date_str, symptom, template=template, marks=self.cell_marks)
-        self.draw_calendar_view()
+        try:
+            day_num = int(date_str.split('-')[2])
+        except (IndexError, ValueError):
+            self.draw_calendar_view()
+            return
+        self._apply_cell_visuals(symptom, day_num)
 
     def assign_scale(self, date_str, symptom, scale):
         self.cell_marks = calendar_marks_manager.update_mark(date_str, symptom, scale=scale, marks=self.cell_marks)
-        self.draw_calendar_view()
+        try:
+            day_num = int(date_str.split('-')[2])
+        except (IndexError, ValueError):
+            self.draw_calendar_view()
+            return
+        self._apply_cell_visuals(symptom, day_num)
 
     def remove_cell_mark(self, date_str, symptom):
         self.cell_marks = calendar_marks_manager.remove_mark(date_str, symptom, self.cell_marks)
-        self.draw_calendar_view()
+        try:
+            day_num = int(date_str.split('-')[2])
+        except (IndexError, ValueError):
+            self.draw_calendar_view()
+            return
+        self._apply_cell_visuals(symptom, day_num)
 
     def prev_month(self):
         self.current_date -= pd.DateOffset(months=1)
