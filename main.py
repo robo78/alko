@@ -6,6 +6,7 @@ import settings_manager
 import email_notifier
 import reminder_scheduler
 import symptoms
+import calendar_marks_manager
 from datetime import datetime
 import calendar
 import subprocess
@@ -17,6 +18,8 @@ class CravingApp:
         self.root.title("Dzienniczek Głodów Alkoholowych")
         self.root.geometry("1200x800")
         self.selected_symptoms = []
+        self.templates = []
+        self.cell_marks = calendar_marks_manager.load_marks()
         self.current_date = datetime.now()
 
         # --- Main Layout ---
@@ -72,25 +75,78 @@ class CravingApp:
             day_button = ttk.Button(self.calendar_frame, text=str(day_num), command=lambda d=date: self.open_new_entry_window(d))
             day_button.grid(row=0, column=day_num, sticky="nsew")
 
+        self.cell_marks = calendar_marks_manager.load_marks()
+
         for i, symptom in enumerate(symptoms.SYMPTOM_LIST, start=1):
             symptom_label = ttk.Label(self.calendar_frame, text=symptom, wraplength=200, relief="solid", borderwidth=1, padding=5)
             symptom_label.grid(row=i, column=0, sticky="nsew")
             for day_num in range(1, days_in_month + 1):
                 cell_color = "#f0f0f0"
+                cell_text = ""
+                date_str = datetime(self.current_date.year, self.current_date.month, day_num).strftime("%Y-%m-%d")
+                mark_template = calendar_marks_manager.get_template(date_str, symptom, self.cell_marks)
+                if mark_template is not None:
+                    cell_color = "#ff7979"
+                    cell_text = mark_template if mark_template else "✓"
                 if not month_df.empty:
                     day_entries = month_df[month_df['timestamp'].dt.day == day_num]
                     if not day_entries.empty and 'triggers' in day_entries.columns:
                         symptom_present = day_entries['triggers'].str.contains(symptom, na=False).any()
                         if symptom_present:
-                            cell_color = "#ff7979"
-                cell = tk.Label(self.calendar_frame, bg=cell_color, relief="solid", borderwidth=1)
+                            cell_color = "#ffb3b3" if mark_template is None else cell_color
+                cell = tk.Label(self.calendar_frame, bg=cell_color, relief="solid", borderwidth=1, text=cell_text)
                 cell.grid(row=i, column=day_num, sticky="nsew")
+                cell.bind("<Button-1>", lambda e, s=symptom, d=day_num: self.handle_cell_click(e, s, d))
+                cell.bind("<Button-3>", lambda e, s=symptom, d=day_num: self.open_cell_menu(e, s, d))
+                cell.configure(cursor="hand2")
 
         self.calendar_frame.grid_columnconfigure(0, weight=1, uniform="group1")
         for col in range(1, days_in_month + 1):
             self.calendar_frame.grid_columnconfigure(col, weight=1, uniform="group1")
         for row in range(len(symptoms.SYMPTOM_LIST) + 1):
             self.calendar_frame.grid_rowconfigure(row, weight=1, uniform="group1")
+
+    def handle_cell_click(self, event, symptom, day_num):
+        date = datetime(self.current_date.year, self.current_date.month, day_num)
+        date_str = date.strftime("%Y-%m-%d")
+        if calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks):
+            self.cell_marks = calendar_marks_manager.remove_mark(date_str, symptom, self.cell_marks)
+        else:
+            default_template = self.templates[0] if self.templates else ""
+            self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, default_template, self.cell_marks)
+        self.draw_calendar_view()
+        self.open_cell_menu(event, symptom, day_num, date_str=date_str)
+
+    def open_cell_menu(self, event, symptom, day_num, date_str=None):
+        if date_str is None:
+            date = datetime(self.current_date.year, self.current_date.month, day_num)
+            date_str = date.strftime("%Y-%m-%d")
+        menu = tk.Menu(self.root, tearoff=0)
+        is_marked = calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks)
+        if is_marked:
+            menu.add_command(label="Usuń zaznaczenie", command=lambda: self.remove_cell_mark(date_str, symptom))
+            if self.templates:
+                menu.add_separator()
+                for template in self.templates:
+                    menu.add_command(label=f"Ustaw szablon: {template}", command=lambda t=template: self.assign_template(date_str, symptom, t))
+        else:
+            menu.add_command(label="Zaznacz głód", command=lambda: self.assign_template(date_str, symptom, self.templates[0] if self.templates else ""))
+            if self.templates:
+                menu.add_separator()
+                for template in self.templates:
+                    menu.add_command(label=f"Zaznacz jako: {template}", command=lambda t=template: self.assign_template(date_str, symptom, t))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def assign_template(self, date_str, symptom, template):
+        self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, template, self.cell_marks)
+        self.draw_calendar_view()
+
+    def remove_cell_mark(self, date_str, symptom):
+        self.cell_marks = calendar_marks_manager.remove_mark(date_str, symptom, self.cell_marks)
+        self.draw_calendar_view()
 
     def prev_month(self):
         self.current_date -= pd.DateOffset(months=1)
@@ -222,8 +278,14 @@ class CravingApp:
         ttk.Checkbutton(reminder_frame, text="Włącz codzienne przypomnienia", variable=self.reminders_enabled_var).grid(row=0, column=0, columnspan=2, padx=5, pady=5, sticky="w")
         ttk.Label(reminder_frame, text="Godzina przypomnienia (HH:MM):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         ttk.Entry(reminder_frame, textvariable=self.reminder_time_var).grid(row=1, column=1, padx=5, pady=5, sticky="w")
-        ttk.Button(self.settings_frame, text="Zapisz Ustawienia", command=self.save_app_settings).grid(row=2, column=0, padx=10, pady=10)
-        ttk.Button(self.settings_frame, text="Wyślij E-mail Testowy", command=self.send_test_email_action).grid(row=3, column=0, padx=10, pady=10)
+        templates_frame = ttk.LabelFrame(self.settings_frame, text="Szablony zaznaczeń")
+        templates_frame.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+        ttk.Label(templates_frame, text="Podaj nazwy szablonów (jeden na linię):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.templates_text = tk.Text(templates_frame, height=5, width=40)
+        self.templates_text.grid(row=1, column=0, padx=5, pady=5, sticky="ew")
+        templates_frame.columnconfigure(0, weight=1)
+        ttk.Button(self.settings_frame, text="Zapisz Ustawienia", command=self.save_app_settings).grid(row=3, column=0, padx=10, pady=10)
+        ttk.Button(self.settings_frame, text="Wyślij E-mail Testowy", command=self.send_test_email_action).grid(row=4, column=0, padx=10, pady=10)
 
     def load_app_settings(self):
         settings = settings_manager.load_settings()
@@ -234,13 +296,22 @@ class CravingApp:
         self.recipient_email_var.set(settings.get("recipient_email", ""))
         self.reminders_enabled_var.set(settings.get("reminders_enabled", False))
         self.reminder_time_var.set(settings.get("reminder_time", "20:00"))
+        self.templates = settings.get("templates", [])
+        if hasattr(self, 'templates_text'):
+            self.templates_text.delete("1.0", tk.END)
+            self.templates_text.insert(tk.END, "\n".join(self.templates))
+        self.draw_calendar_view()
 
     def save_app_settings(self):
         try: port = int(self.smtp_port_var.get())
         except ValueError: messagebox.showerror("Błąd", "Port SMTP musi być liczbą."); return
-        settings = {"smtp_server": self.smtp_server_var.get(), "smtp_port": port, "smtp_user": self.smtp_user_var.get(), "smtp_password": self.smtp_password_var.get(), "recipient_email": self.recipient_email_var.get(), "reminders_enabled": self.reminders_enabled_var.get(), "reminder_time": self.reminder_time_var.get()}
+        templates_raw = self.templates_text.get("1.0", tk.END) if hasattr(self, 'templates_text') else ""
+        templates = [line.strip() for line in templates_raw.splitlines() if line.strip()]
+        settings = {"smtp_server": self.smtp_server_var.get(), "smtp_port": port, "smtp_user": self.smtp_user_var.get(), "smtp_password": self.smtp_password_var.get(), "recipient_email": self.recipient_email_var.get(), "reminders_enabled": self.reminders_enabled_var.get(), "reminder_time": self.reminder_time_var.get(), "templates": templates}
+        self.templates = templates
         settings_manager.save_settings(settings)
         messagebox.showinfo("Sukces", "Ustawienia zostały zapisane. Aplikacja może wymagać ponownego uruchomienia, aby zmiany w harmonogramie zostały zastosowane.")
+        self.draw_calendar_view()
 
     def send_test_email_action(self):
         result = email_notifier.send_email("Testowy e-mail z Dzienniczka Głodów Alkoholowych", "To jest testowa wiadomość, aby sprawdzić, czy ustawienia e-mail są poprawne.")
