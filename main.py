@@ -177,12 +177,15 @@ class CravingApp:
         date = datetime(self.current_date.year, self.current_date.month, day_num)
         date_str = date.strftime("%Y-%m-%d")
         if calendar_marks_manager.is_marked(date_str, symptom, self.cell_marks):
+            previous_value = calendar_marks_manager.get_template(date_str, symptom, self.cell_marks)
             self.cell_marks = calendar_marks_manager.remove_mark(date_str, symptom, self.cell_marks)
+            self.draw_calendar_view()
+            self.open_cell_menu(event, symptom, day_num, date_str=date_str, previous_value=previous_value)
         else:
             self.cell_marks = calendar_marks_manager.set_mark(date_str, symptom, marks=self.cell_marks)
         self._apply_cell_visuals(symptom, day_num)
 
-    def open_cell_menu(self, event, symptom, day_num, date_str=None):
+    def open_cell_menu(self, event, symptom, day_num, date_str=None, previous_value=None):
         if date_str is None:
             date = datetime(self.current_date.year, self.current_date.month, day_num)
             date_str = date.strftime("%Y-%m-%d")
