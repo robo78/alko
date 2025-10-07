@@ -71,15 +71,6 @@ def get_mark(
         save_marks(marks)
     return normalized
 
-def get_scale(
-    date_key: str,
-    symptom: str,
-    marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
-) -> Optional[str]:
-    mark = get_mark(date_key, symptom, marks)
-    if mark is None:
-        return None
-    return mark.get("scale") or None
 
 def get_scale(
     date_key: str,
@@ -91,6 +82,29 @@ def get_scale(
         return None
     return mark.get("scale") or None
 
+
+def get_template(
+    date_key: str,
+    symptom: str,
+    marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+) -> Optional[str]:
+    """Compatibility helper returning legacy template values when available."""
+    marks = load_marks() if marks is None else marks
+    day_marks = marks.get(date_key, {})
+    value = day_marks.get(symptom)
+    if isinstance(value, dict):
+        return value.get("template")
+    return None
+
+def get_scale(
+    date_key: str,
+    symptom: str,
+    marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+) -> Optional[str]:
+    mark = get_mark(date_key, symptom, marks)
+    if mark is None:
+        return None
+    return mark.get("scale") or None
 
 def update_mark(
     date_key: str,

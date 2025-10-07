@@ -21,6 +21,7 @@ class CravingApp:
         self.root = root
         self.root.title("Dzienniczek Głodów Alkoholowych")
         self.root.geometry("1200x800")
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
         self.selected_symptoms = []
         self.font_size = 12
         self.mark_background = "#ff6b6b"
@@ -82,6 +83,7 @@ class CravingApp:
         ttk.Button(control_frame, text="< Poprzedni Miesiąc", command=self.prev_month).pack(side='left')
         self.month_year_label = ttk.Label(control_frame, text="", font=self._get_title_font())
         self.month_year_label.pack(side='left', expand=True)
+        ttk.Button(control_frame, text="Zakończ", command=self.quit_app).pack(side='right', padx=(0, 5))
         ttk.Button(control_frame, text="Następny Miesiąc >", command=self.next_month).pack(side='right')
 
         self.calendar_frame = ttk.Frame(self.journal_frame)
@@ -632,6 +634,13 @@ class CravingApp:
     def send_test_email_action(self):
         result = email_notifier.send_email("Testowy e-mail z Dzienniczka Głodów Alkoholowych", "To jest testowa wiadomość, aby sprawdzić, czy ustawienia e-mail są poprawne.")
         messagebox.showinfo("Wynik Wysyłania E-maila", result)
+
+    def quit_app(self):
+        reminder_scheduler.stop_scheduler_thread()
+        try:
+            self.root.quit()
+        finally:
+            self.root.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
