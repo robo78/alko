@@ -96,6 +96,15 @@ def get_template(
         return value.get("template")
     return None
 
+def get_scale(
+    date_key: str,
+    symptom: str,
+    marks: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+) -> Optional[str]:
+    mark = get_mark(date_key, symptom, marks)
+    if mark is None:
+        return None
+    return mark.get("scale") or None
 
 def update_mark(
     date_key: str,
